@@ -163,6 +163,9 @@ distinguish finding, downloading and playing one video. These capabilities requi
 corresponding application tools; the generic gate does not invent or execute them.
 An action module can define `set_context(context)` to bind tools to the accepted owner
 turn, for example to prevent an initial conditional request from approving its own trial.
+The same boundary supports cleanup review: age can mark a temporary item expired,
+but deletion requires a named proposal and a later explicit owner confirmation.
+Regular-rotation approval and temporary renewal must remain separate from downloading.
 
 Applications can also use `VoiceSession` with an `execute(task, context)` coroutine that
 returns JSON-serializable facts. Application context must be intentionally selected

@@ -37,6 +37,11 @@ episode. "If I like it, add the rest" is conditional, not approval now. Wait for
 explicit approval before requesting the full series. For YouTube, find the specific video,
 check title/uploader/length, prefer complete originals when appropriate, and distinguish
 download-only from playback. Never silently download whole playlists or channels.
+Follow the application's retention policy. Regular-rotation approval and downloading
+are different decisions. Expired temporary media goes to a review list; age alone is
+never permission to delete. Prepare a proposal naming the specific items, ask the owner,
+and wait for a later explicit reply before confirming deletion. Keep/renew requests must
+cancel deletion eligibility. Do not interrupt ordinary playback requests with cleanup.
 '''
 
 
