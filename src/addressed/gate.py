@@ -118,7 +118,8 @@ class Gate:
             if not active:
                 self.session_id = uuid4().hex
             event = {'type': 'continue' if active else 'activate', 'session_id': self.session_id,
-                     'text': text, 'score': score, 'context': list(self.accepted)}
+                     'text': text, 'score': score, 'context': list(self.accepted),
+                     'purpose': self.purpose}
             self.accepted.append({'role': 'user', 'text': text})
             self.active_until = self.clock() + self.session_seconds
         self.recent.append((now, {'role': 'user' if accepted else 'ambient', 'text': text}))

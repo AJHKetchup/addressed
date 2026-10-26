@@ -7,9 +7,9 @@ sentence and recent conversation, and emits a request only when its score crosse
 threshold. The first sentence is preserved, so your agent can start with the request
 you already spoke.
 
-It is a front door for an agent, not an agent framework. It doesn't execute commands,
-call a cloud API or require a cloud account. Bring your own consumer for the accepted
-JSON events: Hermes, a voice API, a local assistant, or an existing application.
+The local gate doesn't execute commands or require a cloud account. Bring your own
+consumer for accepted JSON events, or use the optional Hermes + OpenAI Realtime example
+below. Hermes owns conversation and tools; Realtime supplies transcription and speech.
 
 ```mermaid
 flowchart LR
@@ -92,7 +92,7 @@ speech does not keep a session alive.
 Only accepted requests go to stdout, one JSON object per line:
 
 ```json
-{"type":"activate","session_id":"…","text":"Play the next episode.","score":0.96,"context":[]}
+{"type":"activate","session_id":"…","text":"Play the next episode.","score":0.96,"context":[],"purpose":"Control television playback."}
 ```
 
 Subsequent accepted turns use `"type":"continue"` and the same session ID. `text` is
@@ -103,8 +103,65 @@ event to open your voice session. An expired conversation starts a new session.
 
 See [the Hermes consumer](examples/hermes_stdio.py) for a minimal native Hermes
 integration. For interactive follow-ups, feed its replies back through
-`Gate.assistant_said()` in your application. Addressed deliberately owns no paid API
-connection, credentials, shell execution or action permissions.
+`Gate.assistant_said()` in your application. This text interface has no paid connection.
+
+## A voice session that knows when to stop
+
+The optional [voice example](examples/hermes_realtime.py) handles the complete handoff:
+
+1. Local transcription and the gate listen until a request is accepted.
+2. Local capture stops. A new voice connection receives the assistant purpose,
+   trusted application context, accepted dialogue and the first sentence exactly once.
+   Hermes receives the same context and answers that sentence without making you repeat it.
+3. Realtime transcribes follow-ups; Hermes reasons, asks questions and chooses replies.
+   Realtime reads those replies aloud. No OpenAI Agents SDK is used.
+4. Hermes can call `finish_conversation` when you are done. The session waits for its
+   farewell to finish playing, then closes the WebSocket. Interrupting the farewell
+   keeps the conversation open for your follow-up.
+5. Thirty seconds of silence after a completed exchange closes the connection.
+   A five-minute hard limit also closes it, including when an agent or audio task is
+   stuck. Connection shutdown is bounded. Errors also return to fresh local listening.
+
+Finishing one command does not end the conversation automatically. While voice is
+active, the local gate is paused, so its shorter context TTL cannot create a second
+session. On exit it resets and discards queued audio rather than reopening from an
+old trigger. No cross-session memory is saved by this example.
+
+Keep `addressed serve` running. Install the optional transport, then run:
+
+```bash
+pip install '.[speech,realtime]'
+# Set OPENAI_API_KEY securely in your environment; never commit it.
+python examples/hermes_realtime.py \
+  --hermes-python /path/to/hermes/venv/bin/python \
+  --purpose 'Discuss and select TV programs.' \
+  --context 'Cowboy Bebop means the 1998 anime, English dub.'
+```
+
+This uses an existing, separately configured native Hermes installation and its
+reasoning provider. The example worker exposes only `finish_conversation`; it cannot
+control your TV or acquire media. An application can supply its existing Hermes toolset
+through the small `ask(text, history, context)` callback instead. That callback returns
+`{"reply":"…","finished":false}`. Application context must be intentionally selected
+facts, not secrets or the gate's rejected room conversation.
+
+`--idle-seconds` and `--max-seconds` change the limits. Input uses `--device INDEX`;
+output uses your OS default speaker. Use echo cancellation or headphones to prevent
+the assistant/TV from being transcribed as a person. This example doesn't install an
+echo canceller, select HDMI automatically, or change your TV service.
+
+**Privacy changes while voice is active:** the microphone streams to OpenAI until the
+socket closes. Local pre-wake audio and rejected transcripts are not uploaded. Accepted
+dialogue and selected app context go to Realtime and your configured Hermes provider.
+Voice requires a separately billed API key. Without one, the original local gate still
+works. The adapter was checked with a real loopback WebSocket and native Hermes;
+live OpenAI voice, interruption timing on hardware and far-field performance remain
+unverified.
+
+The adapter uses documented [Realtime conversation events](https://developers.openai.com/api/docs/guides/realtime-conversations)
+and [client events](https://developers.openai.com/api/reference/resources/realtime/client-events).
+Realtime's VAD idle timeout prompts again; it does not disconnect. This application
+owns the actual socket close and waits for speaker drain separately from `response.done`.
 
 ## Tune it for your room
 
@@ -144,8 +201,9 @@ and a live cloud voice session have not been established.
 
 Raw audio isn't saved by Addressed. The gate keeps rejected transcripts briefly in
 bounded process memory; the local model server has its own inference buffers while
-running. Accepted transcripts leave the gate only via stdout; your consumer
-decides where to send them. Decision requests are restricted to loopback addresses
+running. Accepted transcripts leave the text CLI only via stdout; your consumer
+decides where to send them. The optional voice example's cloud behavior is described
+above. Decision requests are restricted to loopback addresses
 and HTTP redirects are disabled. If the model is unavailable or its response is
 malformed, the gate stays closed. Stop the process to stop listening and clear memory.
 

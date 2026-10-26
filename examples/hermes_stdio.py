@@ -31,5 +31,6 @@ for line in sys.stdin:
             if agent.valid_tool_names:
                 raise RuntimeError('This text-only example must not expose action tools')
             session_id = event['session_id']
-        result = agent.run_conversation(event['text'], conversation_history=event.get('context', []))
+        history = [{'role': turn['role'], 'content': turn['text']} for turn in event.get('context', [])]
+        result = agent.run_conversation(event['text'], conversation_history=history)
     print(json.dumps({'role': 'assistant', 'text': result['final_response']}), flush=True)
