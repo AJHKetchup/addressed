@@ -156,6 +156,14 @@ tools must persist queued work and pending schedules beyond the voice session; a
 download is never reported as already playable. The Channel 3 deployment uses native
 SABnzbd imports, persistent series requests and Tunarr time slots for those actions.
 
+The conversational policy also distinguishes a temporary "play something else" from
+"never play this again," asks application tools to persist bans/time restrictions,
+and keeps a one-episode trial separate from later full-series approval. YouTube requests
+distinguish finding, downloading and playing one video. These capabilities require the
+corresponding application tools; the generic gate does not invent or execute them.
+An action module can define `set_context(context)` to bind tools to the accepted owner
+turn, for example to prevent an initial conditional request from approving its own trial.
+
 Applications can also use `VoiceSession` with an `execute(task, context)` coroutine that
 returns JSON-serializable facts. Application context must be intentionally selected
 facts, not secrets or rejected room conversation. This package supplies the voice/tool
