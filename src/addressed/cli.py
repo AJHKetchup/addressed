@@ -13,7 +13,7 @@ def parser():
     p = argparse.ArgumentParser(description='A local, context-aware front door for voice agents.')
     commands = p.add_subparsers(dest='command', required=True)
     install = commands.add_parser('setup', help='Explicitly download pinned local models and CPU runtime')
-    install.add_argument('--speech', action='store_true', help='Also download the 45 MB English streaming speech model')
+    install.add_argument('--speech', action='store_true', help='Also download the 40 MB English streaming speech model')
     install.add_argument('--models', type=Path, default=default_directory())
     serve = commands.add_parser('serve', help='Run the local decision model; localhost only')
     serve.add_argument('--models', type=Path, default=default_directory())

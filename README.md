@@ -9,7 +9,7 @@ you already spoke.
 
 The local gate doesn't execute commands or require a cloud account. Bring your own
 consumer for accepted JSON events, or use the optional Hermes + OpenAI Realtime example
-below. Hermes owns conversation and tools; Realtime supplies transcription and speech.
+below. Realtime owns the conversation; Hermes executes bounded application tools.
 
 ```mermaid
 flowchart LR
@@ -48,7 +48,7 @@ the more conservative defaults are 0.90 and 0.80.
 
 `setup` explicitly downloads pinned, checksum-verified weights and a CPU runtime.
 The decision model is Liquid AI's d1-omni-600M at Q8, about 407 MB; English streaming
-ASR adds about 45 MB. No PyTorch or chat model is installed. The Python gate itself
+ASR uses Vosk small English, a roughly 40 MB download. No PyTorch or chat model is installed. The Python gate itself
 uses only the standard library. Models are cached outside the repository, by default
 under `~/.cache/addressed`.
 
@@ -112,10 +112,12 @@ The optional [voice example](examples/hermes_realtime.py) handles the complete h
 1. Local transcription and the gate listen until a request is accepted.
 2. Local capture stops. A new voice connection receives the assistant purpose,
    trusted application context, accepted dialogue and the first sentence exactly once.
-   Hermes receives the same context and answers that sentence without making you repeat it.
-3. Realtime transcribes follow-ups; Hermes reasons, asks questions and chooses replies.
-   Realtime reads those replies aloud. No OpenAI Agents SDK is used.
-4. Hermes can call `finish_conversation` when you are done. The session waits for its
+   Realtime answers that sentence without making you repeat it. Hermes receives the
+   accepted conversation and application context when an action is delegated.
+3. Realtime converses directly, asks questions and calls `hermes_task` for actions.
+   Hermes executes its bounded toolset and returns receipts. Realtime explains the result.
+   No OpenAI Agents SDK is used.
+4. Realtime can call `end_conversation` when you are done. The session waits for its
    farewell to finish playing, then closes the WebSocket. Interrupting the farewell
    keeps the conversation open for your follow-up.
 5. Thirty seconds of silence after a completed exchange closes the connection.
@@ -134,16 +136,30 @@ pip install '.[speech,realtime]'
 # Set OPENAI_API_KEY securely in your environment; never commit it.
 python examples/hermes_realtime.py \
   --hermes-python /path/to/hermes/venv/bin/python \
+  --tool-module /path/to/application/actions.py \
   --purpose 'Discuss and select TV programs.' \
   --context 'Cowboy Bebop means the 1998 anime, English dub.'
 ```
 
 This uses an existing, separately configured native Hermes installation and its
-reasoning provider. The example worker exposes only `finish_conversation`; it cannot
-control your TV or acquire media. An application can supply its existing Hermes toolset
-through the small `ask(text, history, context)` callback instead. That callback returns
-`{"reply":"…","finished":false}`. Application context must be intentionally selected
-facts, not secrets or the gate's rejected room conversation.
+reasoning provider. Supply a trusted local module with `definitions()` returning
+`(name, function, description)` tuples for the tools you authorize. Each function
+returns a JSON object, with an `error` field on failure. The worker enables exactly
+that toolset, never Hermes' default shell or other unrelated tools. It returns factual
+results and tool receipts; it does not write the spoken conversation.
+
+For example, an application module can expose `search_library`, `request_series`,
+`schedule_show` and `request_status`. A request such as "Add Samurai Champloo and play
+it every day at 1 PM" remains in Realtime's context while it asks "Sub or dub?" After
+the answer, it delegates both acquisition and the daily slot to Hermes. The application's
+tools must persist queued work and pending schedules beyond the voice session; a pending
+download is never reported as already playable. The Channel 3 deployment uses native
+SABnzbd imports, persistent series requests and Tunarr time slots for those actions.
+
+Applications can also use `VoiceSession` with an `execute(task, context)` coroutine that
+returns JSON-serializable facts. Application context must be intentionally selected
+facts, not secrets or rejected room conversation. This package supplies the voice/tool
+handoff; it does not bundle a downloader or replace your application's scheduler.
 
 `--idle-seconds` and `--max-seconds` change the limits. Input uses `--device INDEX`;
 output uses your OS default speaker. Use echo cancellation or headphones to prevent
@@ -155,7 +171,7 @@ socket closes. Local pre-wake audio and rejected transcripts are not uploaded. A
 dialogue and selected app context go to Realtime and your configured Hermes provider.
 Voice requires a separately billed API key. Without one, the original local gate still
 works. The adapter was checked with a real loopback WebSocket and native Hermes;
-live OpenAI voice, interruption timing on hardware and far-field performance remain
+live OpenAI conversation, model clarification choices, interruption timing on hardware and far-field performance remain
 unverified.
 
 The adapter uses documented [Realtime conversation events](https://developers.openai.com/api/docs/guides/realtime-conversations)
@@ -188,10 +204,11 @@ transcription costs more CPU than a keyword detector. Audio queue overflow disca
 discontinuous recording, and old queued utterances expire instead of running late.
 
 Development check: the complete audio-to-handoff path was run on Linux x64 with an
-AMD A6-7310, 3.2 GiB RAM and no AVX2. A synthetic speech replay ignored a background
-sentence and emitted `TURN THE VOLUME DOWN PLEASE` unchanged at the example 0.70
-threshold. A subsequent `Yes.` continued a session after an assistant question.
-Actual microphone capture was also exercised. The model server used about 480 MiB
+AMD A6-7310, 3.2 GiB RAM and no AVX2. A generated replay produced "add samurai sharply
+to our library and play it every day at one pm" and activated at the example 0.70
+threshold. Both intents survived; the title still needs clarification. An earlier
+transducer ASR lost the beginning of that request, so Vosk now supplies local transcripts.
+Actual microphone capture was also exercised. The decision server used about 480 MiB
 RSS; decisions took several seconds on that old CPU. This is a workflow check, not an
 accuracy or speed benchmark. The small ASR model can garble names and background speech.
 Far-field addressing accuracy, false activations per hour, other operating systems
@@ -215,8 +232,8 @@ specially trained addressed-speech detector.
 Code: [MIT](LICENSE). Model weights and runtime keep their own upstream licenses:
 [Liquid AI d1](https://huggingface.co/LiquidAI/d1-omni-600M-GGUF),
 [llama.cpp](https://github.com/ggml-org/llama.cpp),
-[English ASR](https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17),
-[sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx).
+[Vosk English model](https://alphacephei.com/vosk/models),
+[Vosk API](https://github.com/alphacep/vosk-api).
 
 The idea is related to
 [device-directed utterance detection](https://www.amazon.science/publications/device-directed-utterance-detection).

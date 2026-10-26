@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "addressed"
-version = "0.2.0"
+version = "0.3.0"
 description = "A local, context-aware alternative to a wake word."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -12,7 +12,7 @@ license = {text = "MIT"}
 dependencies = []
 
 [project.optional-dependencies]
-speech = ["sherpa-onnx==2.0.1", "numpy>=1.26,<3", "sounddevice>=0.5,<1"]
+speech = ["vosk==0.3.45", "sounddevice>=0.5,<1"]
 realtime = ["websockets>=15,<17"]
 
 [project.scripts]

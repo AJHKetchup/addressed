@@ -1,5 +1,6 @@
 """Streaming local English ASR. Audio exists only in bounded memory queues."""
 from pathlib import Path
+import json
 import queue
 import threading
 import time
@@ -8,34 +9,25 @@ import wave
 
 class Transcriber:
     def __init__(self, directory):
-        import sherpa_onnx
-        folder = Path(directory) / 'speech'
-        self.recognizer = sherpa_onnx.OnlineRecognizer.from_transducer(
-            tokens=str(folder / 'tokens.txt'),
-            encoder=str(folder / 'encoder-epoch-99-avg-1.int8.onnx'),
-            decoder=str(folder / 'decoder-epoch-99-avg-1.onnx'),
-            joiner=str(folder / 'joiner-epoch-99-avg-1.int8.onnx'),
-            num_threads=1, sample_rate=16000, feature_dim=80,
-            enable_endpoint_detection=True, decoding_method='greedy_search',
-            rule1_min_trailing_silence=2.4, rule2_min_trailing_silence=0.8,
-            rule3_min_utterance_length=15)
-        self.stream = self.recognizer.create_stream()
+        from vosk import Model, SetLogLevel
+        SetLogLevel(-1)
+        self.model = Model(str(Path(directory) / 'speech' / 'vosk-model-small-en-us-0.15'))
+        self.reset()
+
+    def reset(self, rate=16000):
+        from vosk import KaldiRecognizer
+        self.rate = rate
+        self.recognizer = KaldiRecognizer(self.model, rate)
 
     def accept(self, pcm, rate=16000, final=False):
-        import numpy as np
-        self.stream.accept_waveform(rate, np.frombuffer(pcm, dtype='<i2').astype('float32') / 32768)
+        if rate != self.rate:
+            self.reset(rate)
         if final:
-            self.stream.accept_waveform(rate, np.zeros(rate, dtype='float32'))
-            self.stream.input_finished()
-        while self.recognizer.is_ready(self.stream):
-            self.recognizer.decode_stream(self.stream)
-        if final or self.recognizer.is_endpoint(self.stream):
-            text = self.recognizer.get_result(self.stream)
-            if final:
-                self.stream = self.recognizer.create_stream()
-            else:
-                # Keep buffered acoustic context at a sentence boundary.
-                self.recognizer.reset(self.stream)
+            text = json.loads(self.recognizer.FinalResult()).get('text', '')
+            self.reset()
+            return text or None
+        if self.recognizer.AcceptWaveform(pcm):
+            text = json.loads(self.recognizer.Result()).get('text', '')
             return text or None
         return None
 
@@ -52,15 +44,14 @@ class Transcriber:
                 yield text
 
 
-def microphone(transcriber, device=None):
+def microphone(transcriber, device=None, *, capture=None):
     """Decode continuously even while the decision model is busy."""
-    import sounddevice as sd
     audio = queue.Queue(maxsize=30)
     utterances = queue.Queue(maxsize=4)
     stopped = threading.Event()
     overflow = threading.Event()
 
-    def capture(indata, frames, timing, status):
+    def capture_audio(indata, frames, timing, status):
         if status:
             overflow.set()
         try:
@@ -79,7 +70,7 @@ def microphone(transcriber, device=None):
                     # A discontinuous recording must not become a pieced-together command.
                     while not audio.empty():
                         audio.get_nowait()
-                    transcriber.stream = transcriber.recognizer.create_stream()
+                    transcriber.reset()
                     overflow.clear()
                     continue
                 text = transcriber.accept(pcm)
@@ -91,8 +82,14 @@ def microphone(transcriber, device=None):
         except Exception as error:
             utterances.put((time.monotonic(), error))
 
-    with sd.RawInputStream(device=device, samplerate=16000, channels=1, dtype='int16',
-                           blocksize=1600, callback=capture):
+    input_callback = capture_audio
+    if capture is None:
+        import sounddevice as sd
+        source = sd.RawInputStream(device=device, samplerate=16000, channels=1, dtype='int16',
+                                   blocksize=1600, callback=input_callback)
+    else:
+        source = capture(input_callback)
+    with source:
         worker = threading.Thread(target=decode, daemon=True)
         worker.start()
         try:

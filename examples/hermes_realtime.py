@@ -48,32 +48,40 @@ class Audio:
         await asyncio.to_thread(self.speaker.close)
 
 
-async def converse(event, args):
+async def converse(event, args, audio=None):
     worker = None
-    audio = None
     # The voice API credential must not override Hermes' configured reasoning provider.
     environment = dict(os.environ)
     environment.pop('OPENAI_API_KEY', None)
     try:
         worker = await asyncio.create_subprocess_exec(args.hermes_python, '-u',
             str(Path(__file__).with_name('hermes_voice_worker.py')),
+            '--tool-module', str(args.tool_module),
             env=environment, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE)
         ready = await asyncio.wait_for(worker.stdout.readline(), 45)
         if not ready or json.loads(ready).get('ready') is not True:
             raise RuntimeError('Hermes is not ready; check its configured provider')
 
-        async def ask(text, history, context):
-            worker.stdin.write((json.dumps({'text': text, 'history': history, 'context': context}) + '\n').encode())
+        async def execute(task, context):
+            worker.stdin.write((json.dumps({'task': task, 'context': context}) + '\n').encode())
             await worker.stdin.drain()
-            line = await worker.stdout.readline()
+            try:
+                line = await worker.stdout.readline()
+            except asyncio.CancelledError:
+                # A late reply must never be mistaken for the next action's receipt.
+                if worker.returncode is None:
+                    worker.terminate()
+                raise
             if not line:
                 raise RuntimeError('Hermes worker disconnected')
             return json.loads(line)
 
-        audio = Audio(args.device)
+        if audio is None:
+            audio = Audio(args.device)
         session = VoiceSession(event, app_context=args.context,
                                idle_seconds=args.idle_seconds, max_seconds=args.max_seconds)
-        reason = await session.connect(os.environ['OPENAI_API_KEY'], ask, audio)
+        reason = await session.connect(os.environ['OPENAI_API_KEY'], execute, audio,
+                                       model=getattr(args, 'model', 'gpt-realtime-2.1'))
         print('Voice closed: ' + reason, file=sys.stderr)
     finally:
         try:
@@ -92,6 +100,7 @@ async def converse(event, args):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--hermes-python', required=True, help='Python executable in your existing Hermes environment')
+    p.add_argument('--tool-module', type=Path, required=True, help='Trusted local module defining the bounded Hermes action tools')
     p.add_argument('--models', type=Path, default=default_directory())
     p.add_argument('--device', type=int)
     p.add_argument('--purpose', default='Answer questions and discuss media.')
@@ -124,7 +133,7 @@ def main():
                 print('Voice stopped: ' + type(error).__name__, file=sys.stderr)
             finally:
                 gate.reset()
-                transcriber.stream = transcriber.recognizer.create_stream()
+                transcriber.reset()
     except KeyboardInterrupt:
         pass
 

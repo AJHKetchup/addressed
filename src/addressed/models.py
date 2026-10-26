@@ -15,13 +15,24 @@ RUNTIMES = {
     ('Darwin', 'arm64'): ('macos-arm64.tar.gz', 'dbed55493d72bc1ba2babc8770d669c2289b5bc4ee9fb2a4dfc158d45b7d13fd'),
     ('Darwin', 'x86_64'): ('macos-x64.tar.gz', 'cab28238d78158109b48deb27b05d50e0dcef56275d2e76da9ca8281526c7532'),
 }
-SPEECH = ('csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17',
-          'd42f2d9f7ca24806fb667456a18a9f1b60f70d16', {
-    'tokens.txt': ('tokens.txt', '49e3c2646595fd907228b3c6787069658f67b17377c60aeb8619c4551b2316fb'),
-    'encoder-epoch-99-avg-1.int8.onnx': ('encoder-epoch-99-avg-1.int8.onnx', '3810755ce7c3ab26b42a8bcf39d191308fa27fb0f53358823ba46141d03b7eb3'),
-    'decoder-epoch-99-avg-1.onnx': ('decoder-epoch-99-avg-1.onnx', '45a7f940ecfb53d89fa270ad11b88b961e53a317203eb24b1c8e95ed208b0f30'),
-    'joiner-epoch-99-avg-1.int8.onnx': ('joiner-epoch-99-avg-1.int8.onnx', 'e085d73b593cf9b0707f370dbd656d58327d3fe36d80d849202ef81df02cb01e'),
-})
+SPEECH_NAME = 'vosk-model-small-en-us-0.15'
+SPEECH_ARCHIVE_HASH = '30f26242c4eb449f948e42cb302dd7a686cb29a3423a8367f99ff41780942498'
+SPEECH_FILES = {
+    'README': 'c0cf286e4f7783306c5f6469b37db69228fb16803b03cae661edb2d7bba64ebb',
+    'graph/disambig_tid.int': '9ad87cc166d0998f08f758f47a6223a120dfffcbee805c4849c3aa5e6bb3c0fc',
+    'graph/Gr.fst': '023c8b7e30704a9e37765c635c252e608a02f361235bf94abdcf2a5225d85b20',
+    'graph/HCLr.fst': '5caafba3081e1646545ac6bff0dd7a318e53dcbdc86f237909ce1d2ac1293d34',
+    'am/final.mdl': '75370a0137f9daf8f469dedd7daa4513ae7a621f03240c6e512e2b50b656a7b6',
+    'ivector/splice.conf': '9f0c5f7c82d18eaf25d8bce470efa9f7741f88411fe428774bc0a9bb69a24756',
+    'ivector/global_cmvn.stats': '33be09afcc80059847a275c3d043b51f1ab954c7c2438ddbbf4745e8ba144ff9',
+    'ivector/final.ie': '3f37faf90c375b9e4740b569398b5829ed9cc07d19be6d441f72c3b71d7efcc6',
+    'ivector/final.dubm': '8c5d7dd69d2122313baaf19f61f35dd3fa18b70c62ac0687e311e1c46e6daca7',
+    'ivector/online_cmvn.conf': 'a2f3571754b64297cb7efb2e7ca3df61995c5a45fcbb97188f90613552bb2dfe',
+    'ivector/final.mat': 'ddd83586dc5f928cda8738b922c85ffe38fc789cb5f9151a712ca12f37265382',
+    'conf/model.conf': '8f14cb1eeb07c762c371db648c6be688d347236155ca0f64fb13b6567a8ce81f',
+    'conf/mfcc.conf': '1e2228006d01d805ad1c267fee9f79709ca87ac51bd82b0e3f5c69ba543f0fc4',
+    'graph/phones/word_boundary.int': 'da199d9c991e0e84681ddbb34627b915b26302d50a8fdaa23c51e2bc3a50b5c3',
+}
 
 
 def default_directory():
@@ -38,7 +49,7 @@ def digest(path):
 
 
 def setup(directory, speech=False):
-    for kind, manifest in [('decision', DECISION)] + ([('speech', SPEECH)] if speech else []):
+    for kind, manifest in [('decision', DECISION)]:
         repository, revision, files = manifest
         folder = Path(directory) / kind
         folder.mkdir(parents=True, exist_ok=True)
@@ -57,6 +68,34 @@ def setup(directory, speech=False):
                 temporary.replace(target)
             finally:
                 temporary.unlink(missing_ok=True)
+    if speech:
+        setup_speech(directory)
+
+
+def setup_speech(directory):
+    import zipfile
+    folder = Path(directory) / 'speech'
+    model = folder / SPEECH_NAME
+    if all((model / name).is_file() and digest(model / name) == expected for name, expected in SPEECH_FILES.items()):
+        return
+    folder.mkdir(parents=True, exist_ok=True)
+    archive = folder / (SPEECH_NAME + '.download.zip')
+    print('Downloading Vosk small English speech model', file=sys.stderr)
+    try:
+        with urlopen('https://alphacephei.com/vosk/models/' + SPEECH_NAME + '.zip', timeout=60) as source, archive.open('wb') as out:
+            for block in iter(lambda: source.read(1024 * 1024), b''):
+                out.write(block)
+        if digest(archive) != SPEECH_ARCHIVE_HASH:
+            raise ValueError('Speech model archive checksum mismatch')
+        with zipfile.ZipFile(archive) as z:
+            for member in z.namelist():
+                if not (folder / member).resolve().is_relative_to(model.resolve()):
+                    raise ValueError('Invalid speech archive path')
+            z.extractall(folder)
+        if not all(digest(model / name) == expected for name, expected in SPEECH_FILES.items()):
+            raise ValueError('Extracted speech model checksum mismatch')
+    finally:
+        archive.unlink(missing_ok=True)
 
 
 def setup_runtime(directory):
